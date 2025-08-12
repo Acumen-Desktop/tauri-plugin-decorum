@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm install:*)",
+      "Bash(pnpm tauri:*)",
+      "Bash(cargo update:*)",
+      "Bash(cargo check:*)",
+      "WebFetch(domain:docs.rs)",
+      "Bash(pkill:*)",
+      "Bash(true)",
+      "Bash(cargo tauri:*)",
+      "Bash(RUST_BACKTRACE=1 pnpm tauri dev)",
+      "WebFetch(domain:v2.tauri.app)",
+      "WebFetch(domain:crates.io)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

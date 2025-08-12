@@ -8,14 +8,24 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_decorum::init())
         .setup(|app| {
-            // Create a custom titlebar for main window
-            // On Windows this will hide decoration and render custom window controls
-            // On macOS it expects a hiddenTitle: true and titleBarStyle: overlay
+            println!("Setting up application...");
+            
+            // Get the main window
             let main_window = app.get_webview_window("main").unwrap();
+            println!("Got main window: {}", main_window.label());
+            
+            // Create a custom titlebar for the main window
             main_window.create_overlay_titlebar().unwrap();
+            println!("Created overlay titlebar");
 
+            // On macOS, set traffic light positions
             #[cfg(target_os = "macos")]
-            main_window.set_traffic_lights_inset(16.0, 20.0).unwrap();
+            {
+                println!("Setting traffic light positions...");
+                main_window.set_traffic_lights_inset(20.0, 15.0).unwrap();
+                println!("Traffic light positions set");
+            }
+            
             Ok(())
         })
         .run(tauri::generate_context!())

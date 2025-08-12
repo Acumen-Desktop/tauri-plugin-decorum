@@ -5,7 +5,7 @@
 
 use objc::{msg_send, sel, sel_impl};
 use rand::{distributions::Alphanumeric, Rng};
-use tauri::{Emitter, Runtime, Window};
+use tauri::{Emitter, Runtime, WebviewWindow};
 
 const WINDOW_CONTROL_PAD_X: f64 = 12.0;
 const WINDOW_CONTROL_PAD_Y: f64 = 16.0;
@@ -81,13 +81,15 @@ pub fn position_traffic_lights(ns_window_handle: UnsafeWindowHandle, x: f64, y: 
 #[cfg(target_os = "macos")]
 #[derive(Debug)]
 struct WindowState<R: Runtime> {
-    window: Window<R>,
+    window: WebviewWindow<R>,
     traffic_light_x: f64,
     traffic_light_y: f64,
 }
 
 #[cfg(target_os = "macos")]
-pub fn setup_traffic_light_positioner<R: Runtime>(window: Window<R>) {
+pub fn setup_traffic_light_positioner<R: Runtime>(window: WebviewWindow<R>) {
+    // Add debug logging
+    println!("Setting up traffic light positioner for window: {}", window.label());
     use cocoa::appkit::{NSWindow, NSWindowButton};
     use cocoa::base::{id, BOOL};
     use cocoa::foundation::NSUInteger;
@@ -119,12 +121,22 @@ pub fn setup_traffic_light_positioner<R: Runtime>(window: Window<R>) {
     fn with_window_state<R: Runtime, F: FnOnce(&mut WindowState<R>) -> T, T>(
         this: &Object,
         func: F,
-    ) {
+    ) -> Option<T> {
         let ptr = unsafe {
-            let x: *mut c_void = *this.get_ivar("app_box");
-            &mut *(x as *mut WindowState<R>)
+            // Use catch_unwind to handle the case where the ivar doesn't exist
+            match std::panic::catch_unwind(|| *this.get_ivar::<*mut c_void>("app_box")) {
+                Ok(x) if !x.is_null() => &mut *(x as *mut WindowState<R>),
+                _ => return None, // Ivar doesn't exist or is null
+            }
         };
-        func(ptr);
+        Some(func(ptr))
+    }
+
+    // Helper function to safely access ivars without panicking
+    fn safe_get_ivar<T: Copy + objc::Encode>(this: &Object, name: &str) -> Option<T> {
+        unsafe {
+            std::panic::catch_unwind(|| *this.get_ivar::<T>(name)).ok()
+        }
     }
 
     unsafe {
@@ -137,19 +149,25 @@ pub fn setup_traffic_light_positioner<R: Runtime>(window: Window<R>) {
 
         extern "C" fn on_window_should_close(this: &Object, _cmd: Sel, sender: id) -> BOOL {
             unsafe {
-                let super_del: id = *this.get_ivar("super_delegate");
-                msg_send![super_del, windowShouldClose: sender]
+                let super_del: id = safe_get_ivar(this, "super_delegate").unwrap_or(std::ptr::null_mut());
+                if !super_del.is_null() {
+                    msg_send![super_del, windowShouldClose: sender]
+                } else {
+                    0 as BOOL  // Return false if no delegate
+                }
             }
         }
         extern "C" fn on_window_will_close(this: &Object, _cmd: Sel, notification: id) {
             unsafe {
-                let super_del: id = *this.get_ivar("super_delegate");
-                let _: () = msg_send![super_del, windowWillClose: notification];
+                let super_del: id = safe_get_ivar(this, "super_delegate").unwrap_or(std::ptr::null_mut());
+                if !super_del.is_null() {
+                    let _: () = msg_send![super_del, windowWillClose: notification];
+                }
             }
         }
         extern "C" fn on_window_did_resize<R: Runtime>(this: &Object, _cmd: Sel, notification: id) {
             unsafe {
-                with_window_state(&*this, |state: &mut WindowState<R>| {
+                if let Some(_) = with_window_state(&*this, |state: &mut WindowState<R>| {
                     let id = state
                         .window
                         .ns_window()
@@ -162,16 +180,20 @@ pub fn setup_traffic_light_positioner<R: Runtime>(window: Window<R>) {
                         state.traffic_light_x,
                         state.traffic_light_y,
                     );
-                });
+                }) { }  // Close the if let Some(_)
 
-                let super_del: id = *this.get_ivar("super_delegate");
-                let _: () = msg_send![super_del, windowDidResize: notification];
+                let super_del: id = safe_get_ivar(this, "super_delegate").unwrap_or(std::ptr::null_mut());
+                if !super_del.is_null() {
+                    let _: () = msg_send![super_del, windowDidResize: notification];
+                }
             }
         }
         extern "C" fn on_window_did_move(this: &Object, _cmd: Sel, notification: id) {
             unsafe {
-                let super_del: id = *this.get_ivar("super_delegate");
-                let _: () = msg_send![super_del, windowDidMove: notification];
+                let super_del: id = safe_get_ivar(this, "super_delegate").unwrap_or(std::ptr::null_mut());
+                if !super_del.is_null() {
+                    let _: () = msg_send![super_del, windowDidMove: notification];
+                }
             }
         }
         extern "C" fn on_window_did_change_backing_properties(
@@ -180,26 +202,36 @@ pub fn setup_traffic_light_positioner<R: Runtime>(window: Window<R>) {
             notification: id,
         ) {
             unsafe {
-                let super_del: id = *this.get_ivar("super_delegate");
-                let _: () = msg_send![super_del, windowDidChangeBackingProperties: notification];
+                let super_del: id = safe_get_ivar(this, "super_delegate").unwrap_or(std::ptr::null_mut());
+                if !super_del.is_null() {
+                    let _: () = msg_send![super_del, windowDidChangeBackingProperties: notification];
+                }
             }
         }
         extern "C" fn on_window_did_become_key(this: &Object, _cmd: Sel, notification: id) {
             unsafe {
-                let super_del: id = *this.get_ivar("super_delegate");
-                let _: () = msg_send![super_del, windowDidBecomeKey: notification];
+                let super_del: id = safe_get_ivar(this, "super_delegate").unwrap_or(std::ptr::null_mut());
+                if !super_del.is_null() {
+                    let _: () = msg_send![super_del, windowDidBecomeKey: notification];
+                }
             }
         }
         extern "C" fn on_window_did_resign_key(this: &Object, _cmd: Sel, notification: id) {
             unsafe {
-                let super_del: id = *this.get_ivar("super_delegate");
-                let _: () = msg_send![super_del, windowDidResignKey: notification];
+                let super_del: id = safe_get_ivar(this, "super_delegate").unwrap_or(std::ptr::null_mut());
+                if !super_del.is_null() {
+                    let _: () = msg_send![super_del, windowDidResignKey: notification];
+                }
             }
         }
         extern "C" fn on_dragging_entered(this: &Object, _cmd: Sel, notification: id) -> BOOL {
             unsafe {
-                let super_del: id = *this.get_ivar("super_delegate");
-                msg_send![super_del, draggingEntered: notification]
+                let super_del: id = safe_get_ivar(this, "super_delegate").unwrap_or(std::ptr::null_mut());
+                if !super_del.is_null() {
+                    msg_send![super_del, draggingEntered: notification]
+                } else {
+                    0 as BOOL  // Return false if no delegate
+                }
             }
         }
         extern "C" fn on_prepare_for_drag_operation(
@@ -208,26 +240,38 @@ pub fn setup_traffic_light_positioner<R: Runtime>(window: Window<R>) {
             notification: id,
         ) -> BOOL {
             unsafe {
-                let super_del: id = *this.get_ivar("super_delegate");
-                msg_send![super_del, prepareForDragOperation: notification]
+                let super_del: id = safe_get_ivar(this, "super_delegate").unwrap_or(std::ptr::null_mut());
+                if !super_del.is_null() {
+                    msg_send![super_del, prepareForDragOperation: notification]
+                } else {
+                    0 as BOOL  // Return false if no delegate
+                }
             }
         }
         extern "C" fn on_perform_drag_operation(this: &Object, _cmd: Sel, sender: id) -> BOOL {
             unsafe {
-                let super_del: id = *this.get_ivar("super_delegate");
-                msg_send![super_del, performDragOperation: sender]
+                let super_del: id = safe_get_ivar(this, "super_delegate").unwrap_or(std::ptr::null_mut());
+                if !super_del.is_null() {
+                    msg_send![super_del, performDragOperation: sender]
+                } else {
+                    0 as BOOL  // Return false if no delegate
+                }
             }
         }
         extern "C" fn on_conclude_drag_operation(this: &Object, _cmd: Sel, notification: id) {
             unsafe {
-                let super_del: id = *this.get_ivar("super_delegate");
-                let _: () = msg_send![super_del, concludeDragOperation: notification];
+                let super_del: id = safe_get_ivar(this, "super_delegate").unwrap_or(std::ptr::null_mut());
+                if !super_del.is_null() {
+                    let _: () = msg_send![super_del, concludeDragOperation: notification];
+                }
             }
         }
         extern "C" fn on_dragging_exited(this: &Object, _cmd: Sel, notification: id) {
             unsafe {
-                let super_del: id = *this.get_ivar("super_delegate");
-                let _: () = msg_send![super_del, draggingExited: notification];
+                let super_del: id = safe_get_ivar(this, "super_delegate").unwrap_or(std::ptr::null_mut());
+                if !super_del.is_null() {
+                    let _: () = msg_send![super_del, draggingExited: notification];
+                }
             }
         }
         extern "C" fn on_window_will_use_full_screen_presentation_options(
@@ -237,8 +281,12 @@ pub fn setup_traffic_light_positioner<R: Runtime>(window: Window<R>) {
             proposed_options: NSUInteger,
         ) -> NSUInteger {
             unsafe {
-                let super_del: id = *this.get_ivar("super_delegate");
-                msg_send![super_del, window: window willUseFullScreenPresentationOptions: proposed_options]
+                let super_del: id = safe_get_ivar(this, "super_delegate").unwrap_or(std::ptr::null_mut());
+                if !super_del.is_null() {
+                    msg_send![super_del, window: window willUseFullScreenPresentationOptions: proposed_options]
+                } else {
+                    proposed_options  // Return the proposed options if no delegate
+                }
             }
         }
         extern "C" fn on_window_did_enter_full_screen<R: Runtime>(
@@ -247,15 +295,17 @@ pub fn setup_traffic_light_positioner<R: Runtime>(window: Window<R>) {
             notification: id,
         ) {
             unsafe {
-                with_window_state(&*this, |state: &mut WindowState<R>| {
+                if let Some(_) = with_window_state(&*this, |state: &mut WindowState<R>| {
                     state
                         .window
                         .emit("did-enter-fullscreen", ())
                         .expect("Failed to emit event");
-                });
+                }) { }  // Close the if let Some(_)
 
-                let super_del: id = *this.get_ivar("super_delegate");
-                let _: () = msg_send![super_del, windowDidEnterFullScreen: notification];
+                let super_del: id = safe_get_ivar(this, "super_delegate").unwrap_or(std::ptr::null_mut());
+                if !super_del.is_null() {
+                    let _: () = msg_send![super_del, windowDidEnterFullScreen: notification];
+                }
             }
         }
         extern "C" fn on_window_will_enter_full_screen<R: Runtime>(
@@ -264,15 +314,17 @@ pub fn setup_traffic_light_positioner<R: Runtime>(window: Window<R>) {
             notification: id,
         ) {
             unsafe {
-                with_window_state(&*this, |state: &mut WindowState<R>| {
+                if let Some(_) = with_window_state(&*this, |state: &mut WindowState<R>| {
                     state
                         .window
                         .emit("will-enter-fullscreen", ())
                         .expect("Failed to emit event");
-                });
+                }) { }  // Close the if let Some(_)
 
-                let super_del: id = *this.get_ivar("super_delegate");
-                let _: () = msg_send![super_del, windowWillEnterFullScreen: notification];
+                let super_del: id = safe_get_ivar(this, "super_delegate").unwrap_or(std::ptr::null_mut());
+                if !super_del.is_null() {
+                    let _: () = msg_send![super_del, windowWillEnterFullScreen: notification];
+                }
             }
         }
         extern "C" fn on_window_did_exit_full_screen<R: Runtime>(
@@ -281,7 +333,7 @@ pub fn setup_traffic_light_positioner<R: Runtime>(window: Window<R>) {
             notification: id,
         ) {
             unsafe {
-                with_window_state(&*this, |state: &mut WindowState<R>| {
+                if let Some(_) = with_window_state(&*this, |state: &mut WindowState<R>| {
                     state
                         .window
                         .emit("did-exit-fullscreen", ())
@@ -293,10 +345,12 @@ pub fn setup_traffic_light_positioner<R: Runtime>(window: Window<R>) {
                         state.traffic_light_x,
                         state.traffic_light_y,
                     );
-                });
+                }) { }  // Close the if let Some(_)
 
-                let super_del: id = *this.get_ivar("super_delegate");
-                let _: () = msg_send![super_del, windowDidExitFullScreen: notification];
+                let super_del: id = safe_get_ivar(this, "super_delegate").unwrap_or(std::ptr::null_mut());
+                if !super_del.is_null() {
+                    let _: () = msg_send![super_del, windowDidExitFullScreen: notification];
+                }
             }
         }
         extern "C" fn on_window_will_exit_full_screen<R: Runtime>(
@@ -305,15 +359,17 @@ pub fn setup_traffic_light_positioner<R: Runtime>(window: Window<R>) {
             notification: id,
         ) {
             unsafe {
-                with_window_state(&*this, |state: &mut WindowState<R>| {
+                if let Some(_) = with_window_state(&*this, |state: &mut WindowState<R>| {
                     state
                         .window
                         .emit("will-exit-fullscreen", ())
                         .expect("Failed to emit event");
-                });
+                }) { }  // Close the if let Some(_)
 
-                let super_del: id = *this.get_ivar("super_delegate");
-                let _: () = msg_send![super_del, windowWillExitFullScreen: notification];
+                let super_del: id = safe_get_ivar(this, "super_delegate").unwrap_or(std::ptr::null_mut());
+                if !super_del.is_null() {
+                    let _: () = msg_send![super_del, windowWillExitFullScreen: notification];
+                }
             }
         }
         extern "C" fn on_window_did_fail_to_enter_full_screen(
@@ -322,8 +378,10 @@ pub fn setup_traffic_light_positioner<R: Runtime>(window: Window<R>) {
             window: id,
         ) {
             unsafe {
-                let super_del: id = *this.get_ivar("super_delegate");
-                let _: () = msg_send![super_del, windowDidFailToEnterFullScreen: window];
+                let super_del: id = safe_get_ivar(this, "super_delegate").unwrap_or(std::ptr::null_mut());
+                if !super_del.is_null() {
+                    let _: () = msg_send![super_del, windowDidFailToEnterFullScreen: window];
+                }
             }
         }
         extern "C" fn on_effective_appearance_did_change(
@@ -332,8 +390,10 @@ pub fn setup_traffic_light_positioner<R: Runtime>(window: Window<R>) {
             notification: id,
         ) {
             unsafe {
-                let super_del: id = *this.get_ivar("super_delegate");
-                let _: () = msg_send![super_del, effectiveAppearanceDidChange: notification];
+                let super_del: id = safe_get_ivar(this, "super_delegate").unwrap_or(std::ptr::null_mut());
+                if !super_del.is_null() {
+                    let _: () = msg_send![super_del, effectiveAppearanceDidChange: notification];
+                }
             }
         }
         extern "C" fn on_effective_appearance_did_changed_on_main_thread(
@@ -342,11 +402,13 @@ pub fn setup_traffic_light_positioner<R: Runtime>(window: Window<R>) {
             notification: id,
         ) {
             unsafe {
-                let super_del: id = *this.get_ivar("super_delegate");
-                let _: () = msg_send![
-                    super_del,
-                    effectiveAppearanceDidChangedOnMainThread: notification
-                ];
+                let super_del: id = safe_get_ivar(this, "super_delegate").unwrap_or(std::ptr::null_mut());
+                if !super_del.is_null() {
+                    let _: () = msg_send![
+                        super_del,
+                        effectiveAppearanceDidChangedOnMainThread: notification
+                    ];
+                }
             }
         }
 
